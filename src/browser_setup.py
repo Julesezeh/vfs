@@ -4,6 +4,8 @@ Handles Chrome driver setup with proxy and anti-detection measures
 """
 
 import logging
+import os
+import zipfile
 import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -58,11 +60,17 @@ class BrowserSetup:
         self.logger.info(f"Using user agent: {user_agent}")
 
         # Proxy configuration
+        proxy_extension = None
         if self.config.get('use_proxy', False):
-            proxy_config = self._setup_proxy()
+            proxy_config, proxy_extension = self._setup_proxy()
             if proxy_config:
                 options.add_argument(f'--proxy-server={proxy_config}')
                 self.logger.info(f"Using proxy: {proxy_config}")
+
+                # Add proxy auth extension if created
+                if proxy_extension:
+                    options.add_extension(proxy_extension)
+                    self.logger.info("Proxy authentication extension loaded")
 
         # Anti-detection measures
         options.add_argument('--disable-blink-features=AutomationControlled')
@@ -122,12 +130,12 @@ class BrowserSetup:
             self.logger.error(f"Error creating browser: {e}")
             raise
 
-    def _setup_proxy(self) -> Optional[str]:
+    def _setup_proxy(self) -> tuple[Optional[str], Optional[str]]:
         """
         Setup proxy configuration
 
         Returns:
-            Proxy string in format host:port or with auth
+            Tuple of (proxy_string, extension_path)
         """
         host = self.config.get('proxy_host', '')
         port = self.config.get('proxy_port', '')
@@ -136,16 +144,108 @@ class BrowserSetup:
 
         if not host or not port:
             self.logger.warning("Proxy enabled but host/port not configured")
-            return None
+            return None, None
 
+        # Proxy string without auth for Chrome argument
+        proxy_str = f"{host}:{port}"
+
+        # Create auth extension if username and password provided
         if user and password:
-            # Proxy with authentication
-            proxy_str = f"http://{user}:{password}@{host}:{port}"
+            extension_path = self._create_proxy_auth_extension(host, port, user, password)
+            return proxy_str, extension_path
         else:
-            # Proxy without authentication
-            proxy_str = f"http://{host}:{port}"
+            return proxy_str, None
 
-        return proxy_str
+    def _create_proxy_auth_extension(self, host: str, port: str, user: str, password: str) -> str:
+        """
+        Create a Chrome extension for proxy authentication
+
+        Args:
+            host: Proxy host
+            port: Proxy port
+            user: Proxy username
+            password: Proxy password
+
+        Returns:
+            Path to the created extension zip file
+        """
+        import tempfile
+
+        # Create extension directory
+        extension_dir = tempfile.mkdtemp()
+
+        # Manifest file
+        manifest_json = """
+{
+    "version": "1.0.0",
+    "manifest_version": 2,
+    "name": "Proxy Auth",
+    "permissions": [
+        "proxy",
+        "tabs",
+        "unlimitedStorage",
+        "storage",
+        "<all_urls>",
+        "webRequest",
+        "webRequestBlocking"
+    ],
+    "background": {
+        "scripts": ["background.js"]
+    },
+    "minimum_chrome_version": "76.0.0"
+}
+"""
+
+        # Background script for proxy authentication
+        background_js = """
+var config = {
+    mode: "fixed_servers",
+    rules: {
+        singleProxy: {
+            scheme: "http",
+            host: "%s",
+            port: parseInt(%s)
+        },
+        bypassList: ["localhost"]
+    }
+};
+
+chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+
+function callbackFn(details) {
+    return {
+        authCredentials: {
+            username: "%s",
+            password: "%s"
+        }
+    };
+}
+
+chrome.webRequest.onAuthRequired.addListener(
+    callbackFn,
+    {urls: ["<all_urls>"]},
+    ['blocking']
+);
+""" % (host, port, user, password)
+
+        # Write files
+        manifest_path = os.path.join(extension_dir, 'manifest.json')
+        background_path = os.path.join(extension_dir, 'background.js')
+
+        with open(manifest_path, 'w') as f:
+            f.write(manifest_json)
+
+        with open(background_path, 'w') as f:
+            f.write(background_js)
+
+        # Create zip file
+        extension_zip = os.path.join(extension_dir, 'proxy_auth_extension.zip')
+        with zipfile.ZipFile(extension_zip, 'w') as zipf:
+            zipf.write(manifest_path, 'manifest.json')
+            zipf.write(background_path, 'background.js')
+
+        self.logger.info(f"Created proxy auth extension: {extension_zip}")
+        return extension_zip
 
     def close(self):
         """Close the browser"""
