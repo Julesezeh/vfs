@@ -77,11 +77,15 @@ class BrowserSetup:
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-gpu')
-        options.add_argument('--disable-extensions')
+        # Don't disable extensions - we need them for proxy auth
+        # options.add_argument('--disable-extensions')
         options.add_argument('--disable-popup-blocking')
         options.add_argument('--disable-notifications')
         options.add_argument('--disable-infobars')
         options.add_argument('--start-maximized')
+
+        # Ensure NOT in incognito mode (proxy extensions don't work in incognito)
+        # Remove any incognito flags that might have been set
 
         # Additional stealth options
         # Note: undetected-chromedriver handles these automatically
@@ -107,7 +111,8 @@ class BrowserSetup:
             self.driver = uc.Chrome(
                 options=options,
                 version_main=None,  # Auto-detect Chrome version
-                use_subprocess=True
+                use_subprocess=True,
+                user_data_dir=None  # Use temporary profile, not incognito
             )
 
             # Additional JavaScript to hide WebDriver
