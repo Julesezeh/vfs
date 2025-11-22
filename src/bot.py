@@ -196,13 +196,34 @@ class VFSBookingBot:
 
             # Navigate to login page
             base_url = self.config['vfs']['base_url']
-            self.driver.get(base_url)
-            self.timing.wait_page_load()
+
+            # Try to load saved cookies first for faster bypass
+            self.logger.info("Attempting to load saved session cookies...")
+            if self.browser_setup.load_cookies(base_url):
+                self.logger.info("Session cookies loaded successfully")
+                # Check if already logged in
+                if self._verify_login():
+                    self.logger.info("Already logged in via saved session!")
+                    self.logged_in = True
+                    return True
+            else:
+                # No saved cookies, navigate normally
+                self.driver.get(base_url)
+                self.timing.wait_page_load()
+
+            # Get Cloudflare timeout from config or use default
+            cloudflare_timeout = self.config.get('cloudflare', {}).get('max_wait', 120)
 
             # Handle Cloudflare challenge if present
-            if not self.cloudflare_handler.handle_cloudflare(max_wait=30):
+            self.logger.info("Checking for Cloudflare challenge...")
+            if not self.cloudflare_handler.handle_cloudflare(max_wait=cloudflare_timeout):
                 self.logger.warning("Cloudflare bypass may have failed or timed out")
-                # Continue anyway - might work
+                # Don't give up - sometimes it works anyway
+                self.logger.info("Attempting to continue despite timeout...")
+            else:
+                # Successfully bypassed - save cookies for next time
+                self.logger.info("Cloudflare bypassed! Saving session cookies...")
+                self.browser_setup.save_cookies()
 
             # Take screenshot
             self.screenshot_helper.take_screenshot("login_page")

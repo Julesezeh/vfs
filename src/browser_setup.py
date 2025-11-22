@@ -5,6 +5,8 @@ Handles Chrome driver setup with proxy and anti-detection measures
 
 import logging
 import os
+import json
+import pickle
 import zipfile
 import undetected_chromedriver as uc
 from selenium import webdriver
@@ -13,6 +15,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from fake_useragent import UserAgent
 from typing import Optional
+from pathlib import Path
 
 
 class BrowserSetup:
@@ -28,6 +31,8 @@ class BrowserSetup:
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.driver = None
+        self.cookies_file = Path("data/cookies.pkl")
+        self.cookies_file.parent.mkdir(exist_ok=True)
 
     def create_driver(self) -> uc.Chrome:
         """
@@ -115,25 +120,173 @@ class BrowserSetup:
                 user_data_dir=None  # Use temporary profile, not incognito
             )
 
-            # Additional JavaScript to hide WebDriver
-            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-                "userAgent": user_agent
-            })
+            # Apply advanced anti-detection measures
+            self._apply_stealth_scripts(user_agent)
 
-            self.driver.execute_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
-
-            # Set timeouts
-            self.driver.set_page_load_timeout(60)
+            # Set timeouts - increased for Cloudflare
+            self.driver.set_page_load_timeout(120)  # Increased for Cloudflare challenges
             self.driver.implicitly_wait(10)
 
-            self.logger.info("Browser initialized successfully")
+            self.logger.info("Browser initialized successfully with stealth mode")
             return self.driver
 
         except Exception as e:
             self.logger.error(f"Error creating browser: {e}")
             raise
+
+    def _apply_stealth_scripts(self, user_agent: str):
+        """
+        Apply comprehensive stealth JavaScript to avoid detection
+
+        Args:
+            user_agent: User agent string to use
+        """
+        try:
+            # Override user agent via CDP
+            self.driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                "userAgent": user_agent,
+                "platform": "Win32",
+                "acceptLanguage": "en-US,en;q=0.9"
+            })
+
+            # Comprehensive stealth script
+            stealth_js = """
+                // Remove webdriver property
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+
+                // Override permissions
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+
+                // Mock plugins
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [
+                        {
+                            0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
+                            description: "Portable Document Format",
+                            filename: "internal-pdf-viewer",
+                            length: 1,
+                            name: "Chrome PDF Plugin"
+                        },
+                        {
+                            0: {type: "application/pdf", suffixes: "pdf", description: "Portable Document Format"},
+                            description: "Portable Document Format",
+                            filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+                            length: 1,
+                            name: "Chrome PDF Viewer"
+                        },
+                        {
+                            0: {type: "application/x-nacl", suffixes: "", description: "Native Client Executable"},
+                            1: {type: "application/x-pnacl", suffixes: "", description: "Portable Native Client Executable"},
+                            description: "",
+                            filename: "internal-nacl-plugin",
+                            length: 2,
+                            name: "Native Client"
+                        }
+                    ]
+                });
+
+                // Mock languages
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+
+                // Mock platform
+                Object.defineProperty(navigator, 'platform', {
+                    get: () => 'Win32'
+                });
+
+                // Mock hardware concurrency (CPU cores)
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => 8
+                });
+
+                // Mock device memory
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => 8
+                });
+
+                // Mock vendor
+                Object.defineProperty(navigator, 'vendor', {
+                    get: () => 'Google Inc.'
+                });
+
+                // Chrome runtime
+                window.chrome = {
+                    runtime: {}
+                };
+
+                // Override toString for functions to hide modifications
+                const originalToString = Function.prototype.toString;
+                Function.prototype.toString = function() {
+                    if (this === window.navigator.permissions.query) {
+                        return 'function query() { [native code] }';
+                    }
+                    return originalToString.call(this);
+                };
+
+                // WebGL vendor override
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) {
+                        return 'Intel Inc.';
+                    }
+                    if (parameter === 37446) {
+                        return 'Intel Iris OpenGL Engine';
+                    }
+                    return getParameter.call(this, parameter);
+                };
+
+                // Battery API
+                if ('getBattery' in navigator) {
+                    navigator.getBattery = () => Promise.resolve({
+                        charging: true,
+                        chargingTime: 0,
+                        dischargingTime: Infinity,
+                        level: 1,
+                        addEventListener: () => {},
+                        removeEventListener: () => {},
+                        dispatchEvent: () => true
+                    });
+                }
+
+                // Connection API - simulate real network
+                if ('connection' in navigator) {
+                    Object.defineProperty(navigator, 'connection', {
+                        get: () => ({
+                            effectiveType: '4g',
+                            rtt: 50,
+                            downlink: 10,
+                            saveData: false
+                        })
+                    });
+                }
+
+                // Screen properties for consistency
+                Object.defineProperty(screen, 'availWidth', {
+                    get: () => window.screen.width
+                });
+                Object.defineProperty(screen, 'availHeight', {
+                    get: () => window.screen.height
+                });
+
+                // Notification permission
+                Object.defineProperty(Notification, 'permission', {
+                    get: () => 'default'
+                });
+            """
+
+            self.driver.execute_script(stealth_js)
+            self.logger.debug("Stealth scripts applied successfully")
+
+        except Exception as e:
+            self.logger.warning(f"Error applying stealth scripts: {e}")
 
     def _setup_proxy(self) -> tuple[Optional[str], Optional[str]]:
         """
@@ -261,10 +414,79 @@ console.log('Proxy auth extension loaded');
         self.logger.info(f"Created proxy auth extension: {extension_zip}")
         return extension_zip
 
+    def save_cookies(self, domain: Optional[str] = None):
+        """
+        Save browser cookies to file for session persistence
+
+        Args:
+            domain: Optional domain filter for cookies
+        """
+        try:
+            if not self.driver:
+                return
+
+            cookies = self.driver.get_cookies()
+
+            # Filter by domain if specified
+            if domain:
+                cookies = [c for c in cookies if domain in c.get('domain', '')]
+
+            with open(self.cookies_file, 'wb') as f:
+                pickle.dump(cookies, f)
+
+            self.logger.info(f"Saved {len(cookies)} cookies to {self.cookies_file}")
+
+        except Exception as e:
+            self.logger.error(f"Error saving cookies: {e}")
+
+    def load_cookies(self, url: str):
+        """
+        Load cookies from file and add to current session
+
+        Args:
+            url: URL to navigate to before loading cookies (required for domain)
+        """
+        try:
+            if not self.cookies_file.exists():
+                self.logger.debug("No saved cookies found")
+                return False
+
+            # Navigate to the domain first (required to set cookies)
+            self.driver.get(url)
+
+            with open(self.cookies_file, 'rb') as f:
+                cookies = pickle.load(f)
+
+            # Add each cookie
+            for cookie in cookies:
+                try:
+                    # Remove expiry if it's in the past
+                    if 'expiry' in cookie:
+                        import time
+                        if cookie['expiry'] < time.time():
+                            continue
+
+                    self.driver.add_cookie(cookie)
+                except Exception as e:
+                    self.logger.debug(f"Could not add cookie {cookie.get('name')}: {e}")
+
+            self.logger.info(f"Loaded {len(cookies)} cookies from {self.cookies_file}")
+
+            # Refresh page to apply cookies
+            self.driver.refresh()
+
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error loading cookies: {e}")
+            return False
+
     def close(self):
-        """Close the browser"""
+        """Close the browser and save cookies"""
         if self.driver:
             try:
+                # Save cookies before closing
+                self.save_cookies()
                 self.driver.quit()
                 self.logger.info("Browser closed successfully")
             except Exception as e:

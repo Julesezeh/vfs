@@ -17,9 +17,16 @@ browser:
   proxy_port: ""  # e.g., "8080"
   proxy_user: ""  # Leave empty if no auth
   proxy_pass: ""  # Leave empty if no auth
+  proxy_scheme: "http"  # "http" or "https"
   window_width: 1920
   window_height: 1080
   user_agent: "auto"  # "auto" for random user agent
+
+# Cloudflare Bypass Configuration
+cloudflare:
+  max_wait: 120  # Maximum time to wait for Cloudflare bypass (in seconds)
+  # Note: Cloudflare challenges can take 1-2 minutes to resolve
+  # Turnstile challenges may need up to 150 seconds
 
 # Timing Configuration (in seconds) - Important for avoiding detection
 timing:

@@ -5,14 +5,16 @@ Handles Cloudflare challenges and on-screen keyboards
 
 import logging
 import time
-from typing import Optional
+import random
+from typing import Optional, Tuple
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 
 class CloudflareHandler:
-    """Handles Cloudflare challenge detection and bypass"""
+    """Handles Cloudflare challenge detection and bypass with advanced strategies"""
 
     def __init__(self, driver, timing_helper):
         """
@@ -25,91 +27,222 @@ class CloudflareHandler:
         self.driver = driver
         self.timing = timing_helper
         self.logger = logging.getLogger(__name__)
+        self.last_detection_type = None
 
-    def detect_cloudflare(self) -> bool:
+    def detect_cloudflare(self) -> Tuple[bool, str]:
         """
-        Detect if Cloudflare challenge is present
+        Detect if Cloudflare challenge is present with type identification
 
         Returns:
-            True if Cloudflare detected, False otherwise
+            Tuple of (is_detected, challenge_type)
+            challenge_type can be: 'turnstile', 'jschallenge', 'managed', 'none'
         """
         try:
-            # Check for common Cloudflare indicators
-            cloudflare_indicators = [
-                "//title[contains(text(), 'Just a moment')]",
-                "//*[contains(text(), 'Checking your browser')]",
-                "//*[contains(text(), 'Cloudflare')]",
-                "//div[@id='cf-wrapper']",
-                "//div[@class='cf-browser-verification']"
+            page_source = self.driver.page_source.lower()
+
+            # Check for Cloudflare Turnstile (interactive challenge)
+            turnstile_indicators = [
+                "//iframe[contains(@src, 'challenges.cloudflare.com')]",
+                "//iframe[contains(@title, 'cloudflare')]",
+                "//*[@id='cf-turnstile']",
+                "//*[contains(@class, 'cf-turnstile')]"
             ]
 
-            for indicator in cloudflare_indicators:
+            for indicator in turnstile_indicators:
                 try:
                     element = self.driver.find_element(By.XPATH, indicator)
-                    if element:
-                        self.logger.info("Cloudflare challenge detected")
-                        return True
+                    if element and element.is_displayed():
+                        self.logger.info("Cloudflare Turnstile challenge detected")
+                        self.last_detection_type = "turnstile"
+                        return True, "turnstile"
                 except:
                     continue
 
-            return False
+            # Check for JavaScript challenge (automatic)
+            js_challenge_indicators = [
+                "//title[contains(text(), 'Just a moment')]",
+                "//*[contains(text(), 'Checking your browser')]",
+                "//div[@id='cf-wrapper']",
+                "//div[@class='cf-browser-verification']",
+                "//*[contains(text(), 'please wait')]",
+                "//*[contains(text(), 'DDoS protection')]"
+            ]
+
+            for indicator in js_challenge_indicators:
+                try:
+                    element = self.driver.find_element(By.XPATH, indicator)
+                    if element:
+                        self.logger.info("Cloudflare JavaScript challenge detected")
+                        self.last_detection_type = "jschallenge"
+                        return True, "jschallenge"
+                except:
+                    continue
+
+            # Check for Cloudflare in page source
+            if 'cloudflare' in page_source and any(phrase in page_source for phrase in
+                ['checking your browser', 'just a moment', 'please wait', 'ray id']):
+                self.logger.info("Cloudflare challenge detected in page source")
+                self.last_detection_type = "managed"
+                return True, "managed"
+
+            # Check for challenge in iframe
+            try:
+                iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                for iframe in iframes:
+                    src = iframe.get_attribute('src') or ''
+                    if 'cloudflare' in src.lower() or 'challenge' in src.lower():
+                        self.logger.info("Cloudflare challenge detected in iframe")
+                        self.last_detection_type = "turnstile"
+                        return True, "turnstile"
+            except:
+                pass
+
+            return False, "none"
 
         except Exception as e:
             self.logger.debug(f"Error detecting Cloudflare: {e}")
-            return False
+            return False, "none"
 
-    def wait_for_cloudflare_bypass(self, timeout: int = 30) -> bool:
+    def _simulate_human_behavior(self):
+        """Simulate human-like mouse movements to appear more natural"""
+        try:
+            # Random mouse movements
+            actions = ActionChains(self.driver)
+
+            # Get window size
+            window_size = self.driver.get_window_size()
+            width = window_size['width']
+            height = window_size['height']
+
+            # Move to random position
+            x = random.randint(100, width - 100)
+            y = random.randint(100, height - 100)
+
+            # Perform movement
+            actions.move_by_offset(x // 2, y // 2).perform()
+            time.sleep(random.uniform(0.1, 0.3))
+
+            # Small random scroll
+            scroll_amount = random.randint(-100, 100)
+            self.driver.execute_script(f"window.scrollBy(0, {scroll_amount});")
+
+        except Exception as e:
+            self.logger.debug(f"Error simulating human behavior: {e}")
+
+    def wait_for_cloudflare_bypass(self, timeout: int = 120, check_interval: float = 2.0) -> bool:
         """
-        Wait for Cloudflare challenge to be bypassed
+        Wait for Cloudflare challenge to be bypassed with enhanced detection
 
         Args:
-            timeout: Maximum time to wait in seconds
+            timeout: Maximum time to wait in seconds (default: 120s for Cloudflare challenges)
+            check_interval: How often to check in seconds (default: 2s)
 
         Returns:
             True if bypassed successfully, False if timeout
         """
         try:
-            self.logger.info("Waiting for Cloudflare bypass...")
+            self.logger.info(f"Waiting for Cloudflare bypass (timeout: {timeout}s)...")
             start_time = time.time()
+            last_url = self.driver.current_url
+            check_count = 0
 
             while time.time() - start_time < timeout:
+                elapsed = int(time.time() - start_time)
+                check_count += 1
+
+                # Log progress every 10 seconds
+                if elapsed > 0 and elapsed % 10 == 0 and check_count % 5 == 0:
+                    self.logger.info(f"Still waiting for Cloudflare bypass... ({elapsed}s elapsed)")
+
                 # Check if challenge is gone
-                if not self.detect_cloudflare():
-                    self.logger.info("Cloudflare bypassed successfully!")
-                    time.sleep(2)  # Extra wait for page to stabilize
+                is_detected, challenge_type = self.detect_cloudflare()
+                if not is_detected:
+                    self.logger.info("Cloudflare challenge resolved!")
+                    # Extra wait for page to fully stabilize
+                    time.sleep(3)
                     return True
 
-                # Check if we're on a different page (bypass succeeded)
-                current_url = self.driver.current_url.lower()
-                if 'cloudflare' not in current_url and 'challenge' not in current_url:
-                    page_source = self.driver.page_source.lower()
-                    if 'checking your browser' not in page_source:
-                        self.logger.info("Cloudflare bypassed (page changed)")
+                # Check for URL change (often indicates bypass success)
+                current_url = self.driver.current_url
+                if current_url != last_url:
+                    self.logger.info(f"URL changed: {last_url} -> {current_url}")
+                    last_url = current_url
+
+                    # If URL changed and no challenge detected, likely succeeded
+                    if not is_detected:
+                        self.logger.info("Cloudflare bypassed (URL changed)")
+                        time.sleep(3)
                         return True
 
-                self.logger.debug("Still waiting for Cloudflare bypass...")
-                time.sleep(2)
+                # Check page source for success indicators
+                try:
+                    page_source = self.driver.page_source.lower()
 
-            self.logger.warning("Cloudflare bypass timeout")
+                    # If we see actual content (not challenge page), might be successful
+                    content_indicators = ['login', 'email', 'password', 'dashboard', 'appointment']
+                    challenge_indicators = ['checking your browser', 'just a moment', 'please wait']
+
+                    has_content = any(indicator in page_source for indicator in content_indicators)
+                    has_challenge = any(indicator in page_source for indicator in challenge_indicators)
+
+                    if has_content and not has_challenge:
+                        self.logger.info("Cloudflare bypassed (content detected)")
+                        time.sleep(3)
+                        return True
+
+                except Exception as e:
+                    self.logger.debug(f"Error checking page content: {e}")
+
+                # Simulate human behavior periodically to avoid detection
+                if check_count % 5 == 0:  # Every ~10 seconds
+                    self._simulate_human_behavior()
+
+                # Progressive check interval - check more frequently at first
+                if elapsed < 30:
+                    sleep_time = 1.5  # Check every 1.5s for first 30s
+                else:
+                    sleep_time = check_interval  # Then use normal interval
+
+                time.sleep(sleep_time)
+
+            self.logger.warning(f"Cloudflare bypass timeout after {timeout}s")
+            # Take screenshot for debugging
+            try:
+                self.driver.save_screenshot("/tmp/cloudflare_timeout.png")
+                self.logger.info("Saved timeout screenshot to /tmp/cloudflare_timeout.png")
+            except:
+                pass
+
             return False
 
         except Exception as e:
             self.logger.error(f"Error waiting for Cloudflare bypass: {e}")
             return False
 
-    def handle_cloudflare(self, max_wait: int = 30) -> bool:
+    def handle_cloudflare(self, max_wait: int = 120) -> bool:
         """
-        Detect and handle Cloudflare challenge
+        Detect and handle Cloudflare challenge with extended timeout
 
         Args:
-            max_wait: Maximum time to wait for automatic bypass
+            max_wait: Maximum time to wait for automatic bypass (default: 120s)
 
         Returns:
             True if handled/bypassed, False if failed
         """
-        if self.detect_cloudflare():
-            self.logger.info("Cloudflare challenge detected - waiting for automatic bypass...")
+        is_detected, challenge_type = self.detect_cloudflare()
+
+        if is_detected:
+            self.logger.info(f"Cloudflare challenge detected (type: {challenge_type})")
+            self.logger.info("Waiting for automatic bypass - this may take up to 2 minutes...")
+
+            # For Turnstile challenges, we might need even more time
+            if challenge_type == "turnstile":
+                self.logger.info("Turnstile challenge detected - using extended timeout")
+                max_wait = max(max_wait, 150)  # At least 2.5 minutes for Turnstile
+
             return self.wait_for_cloudflare_bypass(timeout=max_wait)
+
+        self.logger.debug("No Cloudflare challenge detected")
         return True  # No Cloudflare detected
 
 

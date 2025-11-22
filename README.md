@@ -273,6 +273,26 @@ Detailed logs are saved to `logs/vfs_bot.log`. Check this file for:
 3. Check if VFS requires CAPTCHA (bot can't handle CAPTCHAs)
 4. Verify proxy settings if using proxy
 
+### Cloudflare Challenge Issues
+
+**Problem:** Bot stuck on "Checking your browser" or Cloudflare challenge
+
+**Solutions:**
+1. **Wait longer** - Cloudflare challenges can take 1-2 minutes to resolve automatically
+2. **Check timeout setting** - Increase `cloudflare.max_wait` in `config.yaml` (default: 120 seconds)
+3. **Use session persistence** - The bot now saves cookies after successful bypass for faster subsequent runs
+4. **Run in non-headless mode** - This helps the bot appear more like a real browser
+5. **Check proxy configuration** - Some proxies may trigger more aggressive Cloudflare challenges
+6. **Review logs** - Check `logs/vfs_bot.log` for detailed Cloudflare challenge information
+7. **Look for timeout screenshot** - Check `/tmp/cloudflare_timeout.png` if bypass times out
+
+**Enhanced Cloudflare Features:**
+- Detects different challenge types (Turnstile, JavaScript challenge, Managed challenge)
+- Automatically extends timeout for complex Turnstile challenges (up to 150s)
+- Simulates human-like mouse movements during wait
+- Saves successful session cookies for faster future runs
+- Progressive checking (checks more frequently in first 30 seconds)
+
 ### Proxy Issues
 
 **Problem:** Bot can't connect through proxy
@@ -280,8 +300,9 @@ Detailed logs are saved to `logs/vfs_bot.log`. Check this file for:
 **Solutions:**
 1. Verify proxy host and port are correct
 2. Check if proxy requires authentication
-3. Test proxy with browser first
-4. Try without proxy to isolate issue
+3. Ensure `proxy_scheme` is set correctly ("http" or "https") in `config.yaml`
+4. Test proxy with browser first
+5. Try without proxy to isolate issue
 
 ### No Slots Found
 
