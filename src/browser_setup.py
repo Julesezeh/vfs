@@ -201,23 +201,30 @@ class BrowserSetup:
 }
 """
 
+        # Determine proxy scheme - try to auto-detect from config or use http as default
+        proxy_scheme = self.config.get('proxy_scheme', 'http')
+
         # Background script for proxy authentication
+        # Using both http and https to handle all connections
         background_js = """
 var config = {
     mode: "fixed_servers",
     rules: {
         singleProxy: {
-            scheme: "http",
+            scheme: "%s",
             host: "%s",
             port: parseInt(%s)
         },
-        bypassList: ["localhost"]
+        bypassList: ["localhost", "127.0.0.1"]
     }
 };
 
-chrome.proxy.settings.set({value: config, scope: "regular"}, function() {});
+chrome.proxy.settings.set({value: config, scope: "regular"}, function() {
+    console.log('Proxy configured:', config);
+});
 
 function callbackFn(details) {
+    console.log('Proxy auth request for:', details.url);
     return {
         authCredentials: {
             username: "%s",
@@ -231,7 +238,9 @@ chrome.webRequest.onAuthRequired.addListener(
     {urls: ["<all_urls>"]},
     ['blocking']
 );
-""" % (host, port, user, password)
+
+console.log('Proxy auth extension loaded');
+""" % (proxy_scheme, host, port, user, password)
 
         # Write files
         manifest_path = os.path.join(extension_dir, 'manifest.json')
