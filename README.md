@@ -80,10 +80,11 @@ telegram:
 # Proxy Configuration (if using)
 browser:
   use_proxy: true
-  proxy_host: "your.proxy.server"    # Your proxy server
-  proxy_port: "8080"                 # Your proxy port
-  proxy_user: "username"             # Optional
-  proxy_pass: "password"             # Optional
+  proxy_host: "your.proxy.server"    # e.g., "as.lumiproxy.com"
+  proxy_port: "8080"                 # e.g., "5888"
+  proxy_user: "username"             # REQUIRED if proxy needs auth
+  proxy_pass: "password"             # REQUIRED if proxy needs auth
+  proxy_scheme: "http"               # Usually "http"
 
 # Automation Settings
 automation:
@@ -295,14 +296,45 @@ Detailed logs are saved to `logs/vfs_bot.log`. Check this file for:
 
 ### Proxy Issues
 
-**Problem:** Bot can't connect through proxy
+**Problem:** Proxy authentication popup appears asking for username/password
+
+**Root Cause:** The proxy credentials are missing or not being loaded from `config.yaml`
+
+**Solutions:**
+1. **Add credentials to config.yaml:**
+   ```yaml
+   browser:
+     use_proxy: true
+     proxy_host: "as.lumiproxy.com"  # Your proxy hostname
+     proxy_port: "5888"              # Your proxy port
+     proxy_user: "your_username"     # ADD THIS - your proxy username
+     proxy_pass: "your_password"     # ADD THIS - your proxy password
+     proxy_scheme: "http"            # Usually "http", sometimes "https"
+   ```
+
+2. **Verify credentials are correct** - Test them manually in your regular browser
+
+3. **Check the logs** - Look for these messages:
+   - ✅ "Setting up proxy with authentication for..." - Good!
+   - ❌ "Proxy configured without authentication credentials" - Add proxy_user and proxy_pass!
+
+4. **Common mistakes:**
+   - Empty strings instead of actual values
+   - Wrong indentation in YAML
+   - Missing quotes around special characters in password
+
+**Problem:** Bot can't connect through proxy at all
 
 **Solutions:**
 1. Verify proxy host and port are correct
-2. Check if proxy requires authentication
-3. Ensure `proxy_scheme` is set correctly ("http" or "https") in `config.yaml`
-4. Test proxy with browser first
-5. Try without proxy to isolate issue
+2. Test proxy works in regular browser first
+3. Check `proxy_scheme` ("http" vs "https")
+4. Try without proxy to isolate issue:
+   ```yaml
+   browser:
+     use_proxy: false
+   ```
+5. Check if proxy is blocking Selenium/automated browsers
 
 ### No Slots Found
 

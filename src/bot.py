@@ -228,6 +228,12 @@ class VFSBookingBot:
             # Take screenshot
             self.screenshot_helper.take_screenshot("login_page")
 
+            # Handle cookie consent popup if present
+            self._handle_cookie_consent()
+
+            # Wait a bit for any popups to clear
+            time.sleep(2)
+
             # Find and fill email
             email_field = self._find_element_with_fallback('login_email')
             if not email_field:
@@ -686,6 +692,58 @@ class VFSBookingBot:
             self.logger.error(f"Error extracting appointment details: {e}")
 
         return details
+
+    def _handle_cookie_consent(self):
+        """Handle cookie consent popup if present"""
+        try:
+            self.logger.info("Checking for cookie consent popup...")
+
+            # Common cookie consent button selectors
+            consent_selectors = [
+                # VFS Global specific
+                "//button[contains(text(), 'Accept All Cookies')]",
+                "//button[contains(text(), 'Accept all cookies')]",
+                "//button[contains(text(), 'Accept All')]",
+                "//button[contains(text(), 'Accept')]",
+                # Generic cookie consent buttons
+                "//button[@id='onetrust-accept-btn-handler']",
+                "//button[contains(@class, 'accept-cookies')]",
+                "//button[contains(@class, 'cookie-accept')]",
+                "//a[contains(text(), 'Accept All Cookies')]",
+                "//a[contains(text(), 'Accept')]",
+                # CSS selectors
+                "button[class*='accept']",
+                "button[id*='accept']",
+                ".cookie-accept",
+                ".accept-cookies",
+                "#accept-cookies"
+            ]
+
+            for selector in consent_selectors:
+                try:
+                    # Try XPath first
+                    if selector.startswith('//'):
+                        elements = self.driver.find_elements(By.XPATH, selector)
+                    else:
+                        # CSS selector
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+
+                    for element in elements:
+                        if element and element.is_displayed():
+                            self.logger.info(f"Found cookie consent button: {selector}")
+                            self.element_helper.safe_click(element)
+                            self.logger.info("Clicked cookie consent button")
+                            time.sleep(1)
+                            return True
+                except Exception as e:
+                    continue
+
+            self.logger.debug("No cookie consent popup found")
+            return False
+
+        except Exception as e:
+            self.logger.warning(f"Error handling cookie consent: {e}")
+            return False
 
     def _find_element_with_fallback(self, field_name: str):
         """

@@ -13,14 +13,15 @@ vfs:
 browser:
   headless: false  # Set to true to run without GUI
   use_proxy: true
-  proxy_host: ""  # e.g., "123.45.67.89"
-  proxy_port: ""  # e.g., "8080"
-  proxy_user: ""  # Leave empty if no auth
-  proxy_pass: ""  # Leave empty if no auth
-  proxy_scheme: "http"  # "http" or "https"
+  proxy_host: ""  # e.g., "as.lumiproxy.com" or "123.45.67.89"
+  proxy_port: ""  # e.g., "5888" or "8080"
+  proxy_user: ""  # REQUIRED if proxy needs auth - your proxy username
+  proxy_pass: ""  # REQUIRED if proxy needs auth - your proxy password
+  proxy_scheme: "http"  # "http" or "https" - usually "http"
   window_width: 1920
   window_height: 1080
   user_agent: "auto"  # "auto" for random user agent
+  # NOTE: If you see a proxy authentication popup, make sure proxy_user and proxy_pass are filled in!
 
 # Cloudflare Bypass Configuration
 cloudflare:

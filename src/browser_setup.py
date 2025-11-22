@@ -65,17 +65,18 @@ class BrowserSetup:
         self.logger.info(f"Using user agent: {user_agent}")
 
         # Proxy configuration
-        proxy_extension = None
+        proxy_extension_path = None
         if self.config.get('use_proxy', False):
-            proxy_config, proxy_extension = self._setup_proxy()
+            proxy_config, proxy_extension_path = self._setup_proxy()
             if proxy_config:
-                options.add_argument(f'--proxy-server={proxy_config}')
-                self.logger.info(f"Using proxy: {proxy_config}")
-
-                # Add proxy auth extension if created
-                if proxy_extension:
-                    options.add_extension(proxy_extension)
-                    self.logger.info("Proxy authentication extension loaded")
+                # Don't add proxy server via argument if we're using extension
+                # The extension will handle both proxy and auth
+                if not proxy_extension_path:
+                    # No auth, just use proxy server argument
+                    options.add_argument(f'--proxy-server={proxy_config}')
+                    self.logger.info(f"Using proxy without auth: {proxy_config}")
+                else:
+                    self.logger.info(f"Using proxy with authentication: {proxy_config}")
 
         # Anti-detection measures
         options.add_argument('--disable-blink-features=AutomationControlled')
@@ -113,18 +114,49 @@ class BrowserSetup:
         try:
             # Create undetected Chrome driver
             self.logger.info("Initializing undetected Chrome driver...")
-            self.driver = uc.Chrome(
-                options=options,
-                version_main=None,  # Auto-detect Chrome version
-                use_subprocess=True,
-                user_data_dir=None  # Use temporary profile, not incognito
-            )
+
+            # If we have a proxy extension, we need to load it
+            if proxy_extension_path:
+                self.logger.info(f"Loading proxy extension: {proxy_extension_path}")
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=None,
+                    use_subprocess=True,
+                    user_data_dir=None
+                )
+                # Install the extension after driver creation
+                try:
+                    self.driver.install_addon(proxy_extension_path, temporary=True)
+                    self.logger.info("Proxy authentication extension installed successfully")
+                except Exception as ext_error:
+                    self.logger.warning(f"Could not install extension via install_addon: {ext_error}")
+                    # Try alternative method - add to options before creating driver
+                    try:
+                        # Close current driver and recreate with extension in options
+                        self.driver.quit()
+                        options.add_extension(proxy_extension_path)
+                        self.driver = uc.Chrome(
+                            options=options,
+                            version_main=None,
+                            use_subprocess=True,
+                            user_data_dir=None
+                        )
+                        self.logger.info("Proxy extension loaded via options")
+                    except Exception as e2:
+                        self.logger.error(f"Failed to load proxy extension: {e2}")
+            else:
+                self.driver = uc.Chrome(
+                    options=options,
+                    version_main=None,
+                    use_subprocess=True,
+                    user_data_dir=None
+                )
 
             # Apply advanced anti-detection measures
             self._apply_stealth_scripts(user_agent)
 
             # Set timeouts - increased for Cloudflare
-            self.driver.set_page_load_timeout(120)  # Increased for Cloudflare challenges
+            self.driver.set_page_load_timeout(120)
             self.driver.implicitly_wait(10)
 
             self.logger.info("Browser initialized successfully with stealth mode")
@@ -304,14 +336,18 @@ class BrowserSetup:
             self.logger.warning("Proxy enabled but host/port not configured")
             return None, None
 
-        # Proxy string without auth for Chrome argument
-        proxy_str = f"{host}:{port}"
+        # Proxy string for Chrome argument
+        proxy_scheme = self.config.get('proxy_scheme', 'http')
+        proxy_str = f"{proxy_scheme}://{host}:{port}"
 
         # Create auth extension if username and password provided
         if user and password:
+            self.logger.info(f"Setting up proxy with authentication for {host}:{port}")
             extension_path = self._create_proxy_auth_extension(host, port, user, password)
             return proxy_str, extension_path
         else:
+            self.logger.warning("Proxy configured without authentication credentials")
+            self.logger.warning("If your proxy requires auth, add proxy_user and proxy_pass to config.yaml")
             return proxy_str, None
 
     def _create_proxy_auth_extension(self, host: str, port: str, user: str, password: str) -> str:
