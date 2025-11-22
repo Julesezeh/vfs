@@ -115,42 +115,23 @@ class BrowserSetup:
             # Create undetected Chrome driver
             self.logger.info("Initializing undetected Chrome driver...")
 
-            # If we have a proxy extension, we need to load it
+            # If we have a proxy extension, add it to options BEFORE creating driver
             if proxy_extension_path:
                 self.logger.info(f"Loading proxy extension: {proxy_extension_path}")
-                self.driver = uc.Chrome(
-                    options=options,
-                    version_main=None,
-                    use_subprocess=True,
-                    user_data_dir=None
-                )
-                # Install the extension after driver creation
                 try:
-                    self.driver.install_addon(proxy_extension_path, temporary=True)
-                    self.logger.info("Proxy authentication extension installed successfully")
+                    options.add_extension(proxy_extension_path)
+                    self.logger.info("Proxy extension added to Chrome options")
                 except Exception as ext_error:
-                    self.logger.warning(f"Could not install extension via install_addon: {ext_error}")
-                    # Try alternative method - add to options before creating driver
-                    try:
-                        # Close current driver and recreate with extension in options
-                        self.driver.quit()
-                        options.add_extension(proxy_extension_path)
-                        self.driver = uc.Chrome(
-                            options=options,
-                            version_main=None,
-                            use_subprocess=True,
-                            user_data_dir=None
-                        )
-                        self.logger.info("Proxy extension loaded via options")
-                    except Exception as e2:
-                        self.logger.error(f"Failed to load proxy extension: {e2}")
-            else:
-                self.driver = uc.Chrome(
-                    options=options,
-                    version_main=None,
-                    use_subprocess=True,
-                    user_data_dir=None
-                )
+                    self.logger.error(f"Failed to add proxy extension to options: {ext_error}")
+                    raise
+
+            # Create driver with configured options (including extension if proxy is used)
+            self.driver = uc.Chrome(
+                options=options,
+                version_main=None,
+                use_subprocess=True,
+                user_data_dir=None
+            )
 
             # Apply advanced anti-detection measures
             self._apply_stealth_scripts(user_agent)

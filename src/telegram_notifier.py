@@ -4,6 +4,7 @@ Sends alerts and updates via Telegram
 """
 
 import logging
+import html
 from datetime import datetime
 from typing import Optional
 import asyncio
@@ -85,7 +86,7 @@ class TelegramNotifier:
         Send a message via Telegram
 
         Args:
-            message: Message text to send
+            message: Message text to send (may contain HTML tags)
             photo_path: Optional path to photo to send with message
 
         Returns:
@@ -146,7 +147,9 @@ class TelegramNotifier:
             error_message: Error description
             screenshot: Optional screenshot path
         """
-        message = f"❌ <b>ERROR OCCURRED</b>\n\n{error_message}"
+        # Escape HTML entities to prevent Telegram parsing errors
+        escaped_error = html.escape(str(error_message))
+        message = f"❌ <b>ERROR OCCURRED</b>\n\n{escaped_error}"
         return self.send_message(message, screenshot)
 
     def notify_no_slots(self) -> bool:
