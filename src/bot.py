@@ -16,6 +16,7 @@ from .browser_setup import BrowserSetup
 from .telegram_notifier import TelegramNotifier
 from .utils import TimingHelper, ElementHelper, ScreenshotHelper
 from .field_mappings import VFSFieldMappings, VisaTypeFields
+from .security_bypass import CloudflareHandler, VirtualKeyboardHandler
 
 
 class VFSBookingBot:
@@ -39,6 +40,8 @@ class VFSBookingBot:
         self.timing = TimingHelper(config['timing'])
         self.element_helper = None
         self.screenshot_helper = None
+        self.cloudflare_handler = None
+        self.keyboard_handler = None
 
         # Initialize Telegram notifier
         telegram_config = config['telegram']
@@ -64,6 +67,8 @@ class VFSBookingBot:
             self.driver = self.browser_setup.create_driver()
             self.element_helper = ElementHelper(self.driver, self.timing)
             self.screenshot_helper = ScreenshotHelper(self.driver)
+            self.cloudflare_handler = CloudflareHandler(self.driver, self.timing)
+            self.keyboard_handler = VirtualKeyboardHandler(self.driver, self.timing)
 
             # Notify start
             if self.config['telegram'].get('notify_on_start', True):
@@ -194,6 +199,11 @@ class VFSBookingBot:
             self.driver.get(base_url)
             self.timing.wait_page_load()
 
+            # Handle Cloudflare challenge if present
+            if not self.cloudflare_handler.handle_cloudflare(max_wait=30):
+                self.logger.warning("Cloudflare bypass may have failed or timed out")
+                # Continue anyway - might work
+
             # Take screenshot
             self.screenshot_helper.take_screenshot("login_page")
 
@@ -213,10 +223,17 @@ class VFSBookingBot:
             if not password_field:
                 raise Exception("Could not find password field")
 
-            self.element_helper.human_type(
-                password_field,
-                self.credentials['vfs_account']['password']
-            )
+            # Use smart password handler (handles virtual keyboards, direct input, etc.)
+            password = self.credentials['vfs_account']['password']
+            if not self.keyboard_handler.handle_password_input(password_field, password):
+                self.logger.warning("Automatic password input may have failed")
+                # Take screenshot for manual intervention
+                self.screenshot_helper.take_screenshot("password_input_failed")
+                # Wait for user to manually enter password if needed
+                if not self.config['browser'].get('headless', False):
+                    self.logger.info("Please enter password manually if needed...")
+                    time.sleep(10)  # Give user time to intervene
+
             self.timing.wait_form_field()
 
             # Click login button
