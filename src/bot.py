@@ -81,7 +81,9 @@ class VFSBookingBot:
 
         except Exception as e:
             self.logger.error(f"Fatal error: {e}", exc_info=True)
-            screenshot = self.screenshot_helper.take_screenshot("fatal_error")
+            screenshot = None
+            if self.screenshot_helper:
+                screenshot = self.screenshot_helper.take_screenshot("fatal_error")
             self.notifier.notify_error(f"Fatal error: {str(e)}", screenshot)
 
         finally:
