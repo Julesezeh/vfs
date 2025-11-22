@@ -76,8 +76,10 @@ class BrowserSetup:
         options.add_argument('--start-maximized')
 
         # Additional stealth options
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option('useAutomationExtension', False)
+        # Note: undetected-chromedriver handles these automatically
+        # Commenting out to avoid conflicts with newer Chrome versions
+        # options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        # options.add_experimental_option('useAutomationExtension', False)
 
         # Preferences to appear more human-like
         prefs = {
