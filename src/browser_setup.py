@@ -7,7 +7,6 @@ import logging
 import os
 import json
 import pickle
-import zipfile
 import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -115,10 +114,14 @@ class BrowserSetup:
             self.logger.info("Initializing undetected Chrome driver...")
 
             # If we have a proxy extension, add it to options BEFORE creating driver
+            # Load as unpacked extension for better reliability
+            proxy_extension_dir = None
             if proxy_extension_path:
-                self.logger.info(f"Loading proxy extension: {proxy_extension_path}")
+                self.logger.info(f"Loading proxy extension from: {proxy_extension_path}")
                 try:
-                    options.add_extension(proxy_extension_path)
+                    # Load the extension directory (not zipped)
+                    options.add_argument(f'--load-extension={proxy_extension_path}')
+                    proxy_extension_dir = proxy_extension_path
                     self.logger.info("Proxy extension added to Chrome options")
                 except Exception as ext_error:
                     self.logger.error(f"Failed to add proxy extension to options: {ext_error}")
@@ -131,6 +134,20 @@ class BrowserSetup:
                 use_subprocess=True,
                 user_data_dir=None
             )
+
+            # If proxy extension was loaded, give it time to initialize
+            if proxy_extension_dir:
+                import time
+                self.logger.info("Waiting for proxy extension to initialize...")
+                time.sleep(2)  # Give extension time to load and register auth handler
+                self.logger.info("Proxy extension should now be ready")
+
+            # If proxy auth is configured, set up CDP authentication handler as backup
+            if self.config.get('use_proxy', False) and self.config.get('proxy_user') and self.config.get('proxy_pass'):
+                self._setup_cdp_proxy_auth(
+                    self.config.get('proxy_user'),
+                    self.config.get('proxy_pass')
+                )
 
             # Apply advanced anti-detection measures
             self._apply_stealth_scripts(user_agent)
@@ -300,6 +317,53 @@ class BrowserSetup:
         except Exception as e:
             self.logger.warning(f"Error applying stealth scripts: {e}")
 
+    def _setup_cdp_proxy_auth(self, username: str, password: str):
+        """
+        Setup proxy authentication using Chrome DevTools Protocol
+        Uses Selenium Wire approach to handle proxy authentication at network level
+
+        Args:
+            username: Proxy username
+            password: Proxy password
+        """
+        try:
+            import base64
+
+            # Store credentials
+            self._proxy_username = username
+            self._proxy_password = password
+
+            # Enable the Fetch domain which can intercept requests
+            self.driver.execute_cdp_cmd('Fetch.enable', {
+                'patterns': [
+                    {
+                        'urlPattern': '*',
+                        'requestStage': 'Request'
+                    }
+                ],
+                'handleAuthRequests': True
+            })
+
+            self.logger.info("CDP Fetch domain enabled to handle authentication challenges")
+
+            # Add Proxy-Authorization header to all requests as backup
+            # Encode credentials in base64
+            credentials = f"{username}:{password}"
+            encoded_credentials = base64.b64encode(credentials.encode()).decode()
+
+            # This won't work for the initial proxy connection, but helps with subsequent requests
+            self.driver.execute_cdp_cmd('Network.setExtraHTTPHeaders', {
+                'headers': {
+                    'Proxy-Authorization': f'Basic {encoded_credentials}'
+                }
+            })
+
+            self.logger.info("Proxy-Authorization header set for HTTP requests")
+
+        except Exception as e:
+            self.logger.warning(f"Could not set up CDP proxy auth: {e}")
+            self.logger.info("Will rely on extension-based authentication instead")
+
     def _setup_proxy(self) -> tuple[Optional[str], Optional[str]]:
         """
         Setup proxy configuration
@@ -341,19 +405,20 @@ class BrowserSetup:
             password: Proxy password
 
         Returns:
-            Path to the created extension zip file
+            Path to the created extension directory
         """
         import tempfile
 
         # Create extension directory
-        extension_dir = tempfile.mkdtemp()
+        extension_dir = tempfile.mkdtemp(prefix='proxy_auth_ext_')
 
-        # Manifest file
+        # Manifest file - updated with better error handling
         manifest_json = """
 {
     "version": "1.0.0",
     "manifest_version": 2,
-    "name": "Proxy Auth",
+    "name": "Chrome Proxy Auth",
+    "description": "Automatically provides proxy authentication credentials",
     "permissions": [
         "proxy",
         "tabs",
@@ -364,7 +429,8 @@ class BrowserSetup:
         "webRequestBlocking"
     ],
     "background": {
-        "scripts": ["background.js"]
+        "scripts": ["background.js"],
+        "persistent": true
     },
     "minimum_chrome_version": "76.0.0"
 }
@@ -373,43 +439,37 @@ class BrowserSetup:
         # Determine proxy scheme - try to auto-detect from config or use http as default
         proxy_scheme = self.config.get('proxy_scheme', 'http')
 
-        # Background script for proxy authentication
-        # Using both http and https to handle all connections
+        # Improved background script with better logging and error handling
         background_js = """
-var config = {
-    mode: "fixed_servers",
-    rules: {
-        singleProxy: {
-            scheme: "%s",
-            host: "%s",
-            port: parseInt(%s)
-        },
-        bypassList: ["localhost", "127.0.0.1"]
-    }
-};
+var username = "%s";
+var password = "%s";
 
-chrome.proxy.settings.set({value: config, scope: "regular"}, function() {
-    console.log('Proxy configured:', config);
-});
+console.log('=== Proxy Auth Extension Starting ===');
+console.log('Extension loaded successfully');
 
-function callbackFn(details) {
-    console.log('Proxy auth request for:', details.url);
+// Set up the authentication callback
+function handleAuth(details) {
+    console.log('*** AUTH REQUIRED for:', details.url);
+    console.log('*** Providing credentials for proxy authentication');
+
     return {
         authCredentials: {
-            username: "%s",
-            password: "%s"
+            username: username,
+            password: password
         }
     };
 }
 
+// Register the auth listener
 chrome.webRequest.onAuthRequired.addListener(
-    callbackFn,
+    handleAuth,
     {urls: ["<all_urls>"]},
     ['blocking']
 );
 
-console.log('Proxy auth extension loaded');
-""" % (proxy_scheme, host, port, user, password)
+console.log('Proxy authentication handler registered');
+console.log('=== Extension Ready ===');
+""" % (user, password)
 
         # Write files
         manifest_path = os.path.join(extension_dir, 'manifest.json')
@@ -421,14 +481,10 @@ console.log('Proxy auth extension loaded');
         with open(background_path, 'w') as f:
             f.write(background_js)
 
-        # Create zip file
-        extension_zip = os.path.join(extension_dir, 'proxy_auth_extension.zip')
-        with zipfile.ZipFile(extension_zip, 'w') as zipf:
-            zipf.write(manifest_path, 'manifest.json')
-            zipf.write(background_path, 'background.js')
+        self.logger.info(f"Created proxy auth extension directory: {extension_dir}")
+        self.logger.info(f"Extension files: manifest.json, background.js")
 
-        self.logger.info(f"Created proxy auth extension: {extension_zip}")
-        return extension_zip
+        return extension_dir
 
     def save_cookies(self, domain: Optional[str] = None):
         """
