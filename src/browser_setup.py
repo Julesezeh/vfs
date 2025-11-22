@@ -69,14 +69,13 @@ class BrowserSetup:
         if self.config.get('use_proxy', False):
             proxy_config, proxy_extension_path = self._setup_proxy()
             if proxy_config:
-                # Don't add proxy server via argument if we're using extension
-                # The extension will handle both proxy and auth
-                if not proxy_extension_path:
-                    # No auth, just use proxy server argument
-                    options.add_argument(f'--proxy-server={proxy_config}')
-                    self.logger.info(f"Using proxy without auth: {proxy_config}")
-                else:
+                # Always add proxy server argument
+                options.add_argument(f'--proxy-server={proxy_config}')
+                if proxy_extension_path:
+                    # Extension will handle authentication
                     self.logger.info(f"Using proxy with authentication: {proxy_config}")
+                else:
+                    self.logger.info(f"Using proxy without auth: {proxy_config}")
 
         # Anti-detection measures
         options.add_argument('--disable-blink-features=AutomationControlled')
